@@ -347,7 +347,7 @@ def describeScopeData(scopeData):
     'coupling'          : ("Coupling", "%s"),
     'sweep'             : ("Sweep", "%s"),
     'holdoff'           : ("Holdoff", "%0.3e s"),
-    'sensitivity'       : ("Sensitivity", "%0.3e V"),
+    'sensitivity'       : ("Sensitivity", "%0.3e div"),
     'level'             : ("Level", "%0.3e V"),
     
     'edgeDirection'     : ("Edge direction", "%s"),
@@ -379,5 +379,8 @@ def describeScopeData(scopeData):
     if scopeData["alternateTrigger"]:
       tmp = tmp + header("Channel %s Trigger" % channelDict["channelName"], sep='-')
       tmp = tmp + describeDict(channelDict["trigger"], triggerDsc, ljust=25)
+    else:
+      tmp = tmp + header("Trigger")
+      tmp = tmp + describeDict(scopeData["trigger"], triggerDsc, ljust=25)
     
   return tmp
