@@ -111,7 +111,7 @@ if __name__ == "__main__":
         
         signal = np.array(channelDict["samples"]["volts"])
         fft = np.abs(np.fft.fftshift(scipy.fft(signal)))
-        freqs = np.fft.fftshift(scipy.fftpack.fftfreq(signal.size, channelDict["timeScale"] / 250))
+        freqs = np.fft.fftshift(scipy.fftpack.fftfreq(signal.size, channelDict["timeScale"]))
         plt.plot(freqs, 20 * np.log10(fft))
     
     plt.grid()
