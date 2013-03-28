@@ -28,16 +28,46 @@ import sys
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-def __named_struct_parse(field_names, binary_format, data):
-  """
-  Interprets given binary data according to the binary description. The 
-  resulting data is then stored in a OrderedDict.
-  """
-  Class = collections.namedtuple('Class', field_names)
-  return Class._asdict(Class._make(struct.unpack(binary_format, data)))
-  
 
-def parseRigolWFM(f):
+class FormatError(Exception):
+  pass
+
+
+def _parseFile(f, description, leading="<", strict = True):
+  """
+  Parse a binary file according to the provided description.
+  
+  The description is a list of triples, which contain the fieldname, datatype
+  and a test condition.
+  """
+  
+  data = collections.OrderedDict()
+  
+  for field, t, test in description:
+    if t == "nested":
+      data[field] = _parseFile(f, test, leading)
+    else:
+      binary_format = leading+t
+      tmp = f.read(struct.calcsize(binary_format))
+      value = struct.unpack(binary_format, tmp)[0]
+      data[field] = value
+      
+      if test:
+        scope, condition, match = test
+        
+        assert scope in ("expect", "require")
+        assert condition  in ("==", ">=", "<=", "<", ">", "in")
+        matches = eval("value %s match" % condition)
+        
+        if not matches and scope == "require":
+          raise FormatError("Field %s %s %s not met" % (field, condition, match))
+        
+        if strict and not matches and scope == "expect":
+          raise FormatError("Field %s %s %s not met" % (field, condition, match))
+        
+  return data
+
+def parseRigolWFM(f, strict=True):
   """
   Parse a file object which has opened a Rigol WFM file in read-binary 
   mode (rb).
@@ -52,156 +82,109 @@ def parseRigolWFM(f):
   information in the channel data.
   """
   
-  def named_struct_parse_from_file(field_names, binary_format, file_obj):
-    data = file_obj.read(struct.calcsize(binary_format))
-    return __named_struct_parse(field_names, binary_format, data)
-  
-  
-  def protocolAssumption(statement, msg):
-    if not statement:
-      
-      introduction = """\nThe WFM file format is not yet 100%% deciphered.
-There are several field which usage is not known but which typically always have the defined value.
-
-You are lucky and hit a file, which does not have these standard values in one of its unknown fields.
-Most likely you can just ignore this warning. But if you like to help in the development of this program,
-please report your file, settings and scope id to matthias(AT)blaicher.com.
-
-The protocol warning message is:
-%s
-
-
-""" % msg
-      
-      print(introduction, file=sys.stderr)
-  
   # # # #
   # First read in all the known fields and data of the waveform file. It is
   # interpreted later on.
   
-  # # # #
-  # The Rigol file format as implemented here consists of several blocks
-  #
-  # +----------------------+
-  # | waveHdr Part 1       |
-  # +----------------------+
-  # | chanHdr Channel 1    |
-  # +----------------------+
-  # | chanHdr Channel 2    |
-  # +----------------------+
-  # | timeHdr Scale 1      |
-  # +----------------------+
-  # | Unknown              |
-  # +----------------------+
-  # | Trigger mode         |
-  # +----------------------+
-  # | trigHdr 1            |
-  # +----------------------+
-  # | trigHdr 2            |
-  # +----------------------+
-  # | waveHdr Part 2       |
-  # +----------------------+
-  # | timeHdr Scale 2      |
-  # +----------------------+
-  # | waveHdr Part 3       |
-  # +----------------------+
+
+  chan_header  = (
+    ("scaleD",     "i", None),
+    ("shiftD",     "h", None),
+    ("fooA",       "H", ("expect", "==", 0)),
+    ("probeAtt",   "f", ("require", ">", 0)),
+    ("invertD",    "B", ("require", "in", (0,1))),
+    ("written",    "B", ("require", "in", (0,1))),
+    ("invertM",    "B", ("require", "in", (0,1))),
+    ("fooB",       "B", ("expect", "==", 0)),
+    ("scaleM",     "i", None),
+    ("shiftM",     "h", None),
+    ("fooC",       "H", ("expect", "==", 0))
+  )
   
+  time_header  = (
+    ("scaleD",     "q", None),
+    ("delayD",     "q", None),
+    ("smpRate",    "f", ("require", ">=", 0)),
+    ("scaleM",     "q", None),
+    ("delayM",     "q", None)
+  )
   
-  waveHdr1Format = ("magic fooA points1 activeCh fooB",
-                   "<H26sIB3s")
-  waveHdr1 = named_struct_parse_from_file(*waveHdr1Format, file_obj=f)
-  #print("waveHdr1\t:", waveHdr1)
+  trigger_header  = (
+    ("mode",       "B", None),
+    ("source",     "B", None),
+    ("coupling",   "B", None),
+    ("sweep",      "B", None),
+    ("fooA",       "B", ("expect", "==", 0)),
+    ("sens",       "f", None),
+    ("holdoff",    "f", None),
+    ("level",      "f", None),
+    ("direct",     "B", None),
+    ("pulseType",  "B", None),
+    ("fooB",       "H", ("expect", "==", 0)),
+    ("PulseWidth", "f", None),
+    ("slopeType",  "B", None),
+    ("fooC",       "3s", ("expect", "==", b'\x00'*3)),
+    ("lower",      "f", None),
+    ("slopeWid",   "f", None),
+    ("videoPol",   "B", None),
+    ("videoSync",  "B", None),
+    ("videoStd",   "B", None)
+  )
   
-  assert waveHdr1['magic'] == 0xa5a5, "Not a Rigol waveform file."
-  protocolAssumption(waveHdr1['fooA'] == b'\x00'*26, "Unknown field fooA contains not only zeroes")
-  protocolAssumption(waveHdr1['fooB'] == b'\x00'*3, "Unknown field fooB contains not only zeroes")
- 
- 
-  chanHdrFormat = ("scaleD shiftD fooA probeAtt invertD written invertM fooB scaleM shiftM fooC",
-                   "<ihHfBBBBihH")
-  chanHdrCh1 = named_struct_parse_from_file(*chanHdrFormat, file_obj=f)
-  chanHdrCh2 = named_struct_parse_from_file(*chanHdrFormat, file_obj=f)
-  chanHdr = (chanHdrCh1, chanHdrCh2)
-  #print("chanHdrCh1\t:", chanHdrCh1)
-  #print("chanHdrCh2\t:", chanHdrCh2)
+  wfm_header = (
+    ("magic",    "H",   ("require", "==", 0xa5a5)),
+    ("fooA",     "26s", ("expect", "==", b'\x00'*26)),
+    ("points1",  "I",   None),
+    ("activeCh", "B",   ("require", "in", range(1,5))),
+    ("fooB",     "3s",  ("expect", "==", b'\x00'*3)),
+    
+    ("channel1", "nested", chan_header),
+    ("channel2", "nested", chan_header),
+    
+    ("time1",    "nested", time_header),
+    
+    ("fooC",     "4s", ("expect", "==", b'\x00'*4)),
+    ("fooD",     "8s", ("expect", "==", b'\x00\x01\x02\x03\x04\x05\x06\x07')),
+    ("fooE",     "8s", ("expect", "==", b'\x00\x01\x02\x03\x04\x05\x06\x07')),
+    ("fooF",     "2s", ("expect", "==", b'\x07'*2)),
+    
+    ("trigMode", "B",  None),      #FIXME: Add test
+    ("trigHdr1", "nested", trigger_header),
+    ("trigHdr2", "nested", trigger_header),
+    
+    ("fooG",     "9s", ("expect", "==", b'\x00'*9)),
+    ("points2",  "i", None),
+    
+    ("time2",    "nested", time_header),
+    ("smpRate",  "f",  ("require", ">=", 0))
+  )
   
-  for i in range(2):
-    protocolAssumption(chanHdr[i]["fooA"] == 0, "Unknown field fooA does not contain zero")
-    protocolAssumption(chanHdr[i]["fooB"] == 0, "Unknown field fooB does not contain zero")
-    protocolAssumption(chanHdr[i]["scaleD"] == chanHdr[i]["scaleM"], "scaleD and scaleM field differ")
-    protocolAssumption(chanHdr[i]["shiftD"] == chanHdr[i]["shiftM"], "shiftD and shiftM field differ")
-    protocolAssumption(chanHdr[i]["invertD"] == chanHdr[i]["invertM"], "invertD and invertM field differ")
+  fileHdr = _parseFile(f, wfm_header, strict=strict)
   
-  timeHdrFormat = ("scaleD delayD smpRate scaleM delayM",
-                   "<qqfqq")
-  timeHdrScl1 = named_struct_parse_from_file(*timeHdrFormat, file_obj=f)
-  #print("timeHdrScl1\t:", timeHdrScl1)
+  #import pprint
+  #pprint.pprint(fileHdr)
   
-  unkownHdrFormat = ("fooC fooD fooE fooF",
-                     "<4s8s8s2s")
-  unkownHdr = named_struct_parse_from_file(*unkownHdrFormat, file_obj=f)
-  #print("unkownHdr\t:", unkownHdr)
-  
-  protocolAssumption(unkownHdr["fooC"] == b'\x00\x00\x00\x00', "Unknown field fooC contains not only zeroes")
-  protocolAssumption(unkownHdr["fooD"] == b'\x00\x01\x02\x03\x04\x05\x06\x07', "Unknown field fooD contains unknown sequence")
-  protocolAssumption(unkownHdr["fooE"] == b'\x00\x01\x02\x03\x04\x05\x06\x07', "Unknown field fooE contains unknown sequence")
-  protocolAssumption(unkownHdr["fooF"] == b'\x07\x07', "Unknown field fooE contains unknown sequence")
-  
-  trigModeHdrFormat = ("mode", "<B")
-  trigModeHdr = named_struct_parse_from_file(*trigModeHdrFormat, file_obj=f)
-  protocolAssumption(trigModeHdr['mode'] in range(0,5), "Unknown trigger mode")
-  #print("trigModeHdr\t:", trigModeHdr)
-  
-  trigHdrFormat = ("mode source coupling sweep fooA sens holdoff level direct pulseType fooB PulseWidth slopeType fooC lower slopeWid videoPol videoSync videoStd",
-                   "<BBBBBfffBBHfB3sffBBB")
-  trigHdr1 = named_struct_parse_from_file(*trigHdrFormat, file_obj=f)
-  trigHdr2 = named_struct_parse_from_file(*trigHdrFormat, file_obj=f)
-  trigHdr = (trigHdr1, trigHdr2)
-  
-  for i in range(2):
-    protocolAssumption(trigHdr[i]["fooA"] == 0, "Unknown field fooA does not contain zero")
-    protocolAssumption(trigHdr[i]["fooB"] == 0, "Unknown field fooB does not contain zero")
-    protocolAssumption(trigHdr[i]["fooC"] == b'\x00\x00\x00', "Unknown field fooB does not contain zero")
-  
-  
-  #print("trigHdr1\t:", trigHdr1)
-  #print("trigHdr2\t:", trigHdr2)
-  
-  waveHdr2Format = ("fooG points2",
-                   "<9si")
-  waveHdr2 = named_struct_parse_from_file(*waveHdr2Format, file_obj=f)
-  #print("waveHdr2\t:", waveHdr2)
-  
-  timeHdrScl2 = named_struct_parse_from_file(*timeHdrFormat, file_obj=f)
-  timeHdrScl = (timeHdrScl1, timeHdrScl2)
-  #print("timeHdrScl2\t:", timeHdrScl2)
-  
-  waveHdr3Format = ("smpRate", "<f")
-  waveHdr3 = named_struct_parse_from_file(*waveHdr3Format, file_obj=f)
-  #print("waveHdr3\t:", waveHdr3)
-  
-  # Join all waveHdr fields to one dict for convenience
-  waveHdr = dict()
-  waveHdr.update(waveHdr1)
-  waveHdr.update(waveHdr2)
-  waveHdr.update(waveHdr3)
-  #print("waveHdr\t:", waveHdr)
+  # Add some simple access helpers for the repeating fields
+  fileHdr["channels"] = (fileHdr["channel1"], fileHdr["channel2"])
+  fileHdr["points"] = (fileHdr["points1"], fileHdr["points2"])
+  fileHdr["triggers"] = (fileHdr["trigHdr1"], fileHdr["trigHdr2"])
+  fileHdr["times"] = (fileHdr["time1"], fileHdr["time2"])
   
   # Read in the sample data from the scope
   dataIdx = 0
   for channel in range(2):
-    if chanHdr[channel]['written']:
+    if fileHdr["channels"][channel]['written']:
       #print("Channel %i written, reading it" % channel)
-      nBytes = (waveHdr['points1'], waveHdr['points2'])[dataIdx] * struct.calcsize("B")
+      nBytes = fileHdr["points"][dataIdx] * struct.calcsize("B")
       
       if nBytes == 0 and dataIdx==1:
-        nBytes = waveHdr['points1']
+        nBytes = fileHdr['points1']
       
       assert nBytes > 0
       
       sampleData = array.array('B')
       sampleData.fromfile(f, nBytes)
-      chanHdr[channel]['data'] = sampleData
+      fileHdr["channels"][channel]['data'] = sampleData
       dataIdx = dataIdx + 1
   
   
@@ -210,13 +193,13 @@ The protocol warning message is:
   scopeData = dict()
   
   # Other general information
-  scopeData["activeChannel"] = ("CH1", "CH2", "REF", "MATH")[waveHdr["activeCh"] - 1]
-  scopeData["samplerate"] = waveHdr["smpRate"]
+  scopeData["activeChannel"] = ("CH1", "CH2", "REF", "MATH")[fileHdr["activeCh"] - 1]
+  scopeData["samplerate"] = fileHdr["smpRate"]
   
   # If we are not using alternate trigger, all channels share the same trigger
   # information.
-  scopeData["alternateTrigger"] = (trigModeHdr["mode"] == 4)
-  assert scopeData["alternateTrigger"] or trigModeHdr["mode"] == trigHdr1['mode'], "Not in alternate mode, but mode headers don't match"
+  scopeData["alternateTrigger"] = (fileHdr["trigMode"] == 4)
+  assert scopeData["alternateTrigger"] or fileHdr["trigMode"] == fileHdr["trigHdr1"]['mode'], "Not in alternate mode, but mode headers don't match"
   
   def parseTriggerHdr(trigHdr):
     trgDict = dict()
@@ -251,29 +234,29 @@ The protocol warning message is:
   
 
   if not scopeData["alternateTrigger"]:
-    scopeData["trigger"] = parseTriggerHdr(trigHdr1)
+    scopeData["triggers"] = parseTriggerHdr(fileHdr["trigHdr1"])
   
   scopeData["channel"] = dict()
   for channel in range(2):
     channelDict = dict()
-    channelDict["enabled"] = chanHdr[channel]['written']
+    channelDict["enabled"] = fileHdr["channels"][channel]['written']
     
     channelDict["channelName"] = "CH" + str(channel+1)
     
     if channelDict["enabled"]:
       if scopeData["alternateTrigger"]:
-        channelDict["trigger"] = parseTriggerHdr((trigHdr1, trigHdr2)[channel])
+        channelDict["triggers"] = parseTriggerHdr(fileHdr["triggers"][channel])
         # The source field is not valid in alternate trigger mode
-        channelDict["trigger"]["source"] = channelDict["channelName"]
+        channelDict["triggers"]["source"] = channelDict["channelName"]
       else:
-        channelDict["trigger"] = scopeData["trigger"]
+        channelDict["triggers"] = scopeData["triggers"]
         
-      channelDict["probeAttenuation"] = chanHdr[channel]["probeAtt"]
-      channelDict["scale"] = chanHdr[channel]["scaleM"] * 1e-6 * channelDict["probeAttenuation"]
+      channelDict["probeAttenuation"] = fileHdr["channels"][channel]["probeAtt"]
+      channelDict["scale"] = fileHdr["channels"][channel]["scaleM"] * 1e-6 * channelDict["probeAttenuation"]
       
       # FIXME: Check if division by 255 is correct. Some people do multiply by 0.04 (which is 250). 
-      channelDict["shift"] = chanHdr[channel]["shiftM"] / 250. * channelDict["scale"] 
-      channelDict["inverted"] = chanHdr[channel]["invertM"]
+      channelDict["shift"] = fileHdr["channels"][channel]["shiftM"] / 250. * channelDict["scale"] 
+      channelDict["inverted"] = fileHdr["channels"][channel]["invertM"]
       
       if channelDict["inverted"]:
         sign = -1
@@ -281,16 +264,16 @@ The protocol warning message is:
         sign = 1
       
       # Calculate the sample data
-      channelDict["samples"] = {'raw' : chanHdr[channel]['data']}
+      channelDict["samples"] = {'raw' : fileHdr["channels"][channel]['data']}
       channelDict["samples"]["volts"] =  [((125-x)/25.*channelDict["scale"] + channelDict["shift"])*sign for x in channelDict["samples"]["raw"]]
       
       samples = len(channelDict["samples"]["raw"])
       channelDict["nsamples"] = samples
       
       if not scopeData["alternateTrigger"]:
-        timebase = timeHdrScl1
+        timebase = fileHdr["time1"]
       else:
-        timebase = timeHdrScl[channel]
+        timebase = fileHdr["times"][channel]
       
       channelDict["samplerate"] = timebase["smpRate"]
       channelDict["timeScale"] = 1./timebase["smpRate"]
@@ -378,9 +361,9 @@ def describeScopeData(scopeData):
     
     if scopeData["alternateTrigger"]:
       tmp = tmp + header("Channel %s Trigger" % channelDict["channelName"], sep='-')
-      tmp = tmp + describeDict(channelDict["trigger"], triggerDsc, ljust=25)
+      tmp = tmp + describeDict(channelDict["triggers"], triggerDsc, ljust=25)
     else:
       tmp = tmp + header("Trigger")
-      tmp = tmp + describeDict(scopeData["trigger"], triggerDsc, ljust=25)
+      tmp = tmp + describeDict(scopeData["triggers"], triggerDsc, ljust=25)
     
   return tmp

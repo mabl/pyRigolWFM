@@ -3,6 +3,7 @@
 from __future__ import print_function
 import argparse
 import collections
+import sys
 
 import wfm
 
@@ -37,11 +38,18 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Rigol DS1052E WFM file reader')
   parser.add_argument('action', choices=['info', 'csv', 'plot'], help="Action")
   parser.add_argument('infile', type=argparse.FileType('rb'))
-  
+  parser.add_argument('--forgiving', action='store_false', help="Lazier file parsing")
   
   args = parser.parse_args()
   
-  scopeData = wfm.parseRigolWFM(args.infile)
+  try:
+    scopeData = wfm.parseRigolWFM(args.infile, args.forgiving)
+  except wfm.FormatError as e:
+    print("Format does not follow the known file format. Try the --forgiving option.", file=sys.stderr)
+    print("If you'd like to help development, please report this error:\n", file=sys.stderr)
+    print(e, file=sys.stderr)
+    sys.exit()
+  
   scopeDataDsc = wfm.describeScopeData(scopeData)
   
   if args.action == "info":
