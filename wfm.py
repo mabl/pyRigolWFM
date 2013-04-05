@@ -60,10 +60,10 @@ def _parseFile(f, description, leading="<", strict = True):
         matches = eval("value %s match" % condition)
         
         if not matches and scope == "require":
-          raise FormatError("Field %s %s %s not met" % (field, condition, match))
+          raise FormatError("Field %s %s %s not met, got %s" % (field, condition, match, value))
         
         if strict and not matches and scope == "expect":
-          raise FormatError("Field %s %s %s not met" % (field, condition, match))
+          raise FormatError("Field %s %s %s not met, got %s" % (field, condition, match, value))
         
   return data
 
@@ -133,7 +133,11 @@ def parseRigolWFM(f, strict=True):
   
   wfm_header = (
     ("magic",    "H",   ("require", "==", 0xa5a5)),
-    ("fooA",     "26s", ("expect", "==", b'\x00'*26)),
+    
+    ("fooA1",    "14s", ("expect", "==", b'\x00'*14)),
+    ("fooA2",    "B",   ("expect", "in", (0, 1))),      # Unknown field. 0 in most cases.
+    ("fooA3",    "11s", ("expect", "==", b'\x00'*11)),
+    
     ("points1",  "I",   None),
     ("activeCh", "B",   ("require", "in", range(1,5))),
     ("fooB",     "3s",  ("expect", "==", b'\x00'*3)),
