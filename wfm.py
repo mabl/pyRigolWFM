@@ -4,6 +4,7 @@ import collections
 import struct
 import array
 import sys
+import os
 
 # Copyright (c) 2013, Matthias Blaicher
 # All rights reserved.
@@ -159,20 +160,57 @@ def parseRigolWFM(f, strict=True):
     ("fooG",     "9s", ("expect", "==", b'\x00'*9)),
     ("points2",  "i", None),
     
-    ("time2",    "nested", time_header),
-    ("smpRate",  "f",  ("require", ">=", 0))
+    ("time2",    "nested", time_header)
   )
   
-  fileHdr = _parseFile(f, wfm_header, strict=strict)
+  # There are two known versions of the WFM file format:
+  # 1. The presumably older version does not include the smpRate 
+  #    field.
+  # 2. The smpRate field is added between the time2 header and
+  #    the channel data.
   
-  #import pprint
-  #pprint.pprint(fileHdr)
+  wfm_header_append_v2 = (
+    ("smpRate",  "f",  ("require", ">=", 0)),
+  )
+  
+
+  
+  fileHdr = _parseFile(f, wfm_header, strict=strict)
   
   # Add some simple access helpers for the repeating fields
   fileHdr["channels"] = (fileHdr["channel1"], fileHdr["channel2"])
   fileHdr["points"] = (fileHdr["points1"], fileHdr["points2"])
   fileHdr["triggers"] = (fileHdr["trigHdr1"], fileHdr["trigHdr2"])
   fileHdr["times"] = (fileHdr["time1"], fileHdr["time2"])
+  
+  totalPoints = 0
+  for channel in range(2):
+    if fileHdr["channels"][channel]['written']:
+      totalPoints = totalPoints + fileHdr["points"][channel]
+  
+  # #
+  # Detect file version based on file length
+  
+  # Extract the remaining bytes in the file
+  filePosition = f.tell()
+  f.seek(0, os.SEEK_END)
+  fileSize = f.tell()
+  f.seek(filePosition)
+  
+  # Calculate the bytes difference if the data section was to 
+  # start here
+  bytesMissing = (fileSize - filePosition) - totalPoints * struct.calcsize("B")
+  
+  if bytesMissing == 0:
+    pass
+  elif bytesMissing == struct.calcsize("f"):
+    fileHdr_append_v2 = _parseFile(f, wfm_header_append_v2, strict=strict)
+    fileHdr.update(fileHdr_append_v2)
+  else:
+    raise FormatError("File length is not as expected: %i bytes remaining." % (bytesMissing,))
+  
+  #import pprint
+  #pprint.pprint(fileHdr)
   
   # Read in the sample data from the scope
   dataIdx = 0
@@ -198,7 +236,9 @@ def parseRigolWFM(f, strict=True):
   
   # Other general information
   scopeData["activeChannel"] = ("CH1", "CH2", "REF", "MATH")[fileHdr["activeCh"] - 1]
-  scopeData["samplerate"] = fileHdr["smpRate"]
+  
+  if "smpRate" in fileHdr:
+    scopeData["samplerate"] = fileHdr["smpRate"]
   
   # If we are not using alternate trigger, all channels share the same trigger
   # information.
