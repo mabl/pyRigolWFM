@@ -153,7 +153,7 @@ def parseRigolWFM(f, strict=True):
     ("adcMode",   "B",   ("expect", "in", (0, 1))),
     ("padding2",  "3s",  ("require", "==", b'\x00'*3)),
     
-    ("rollStop",  "4s",  ("expect", "==", b'\x00'*4)),
+    ("rollStop",  "I",  ("expect", "==", 0)),
     ("unused4",  "4s",   ("expect", "==", b'\x00'*4)),
     
     ("points1",  "I",   None),
@@ -326,7 +326,13 @@ def parseRigolWFM(f, strict=True):
         sign = 1
       
       # Calculate the sample data
-      channelDict["samples"] = {'raw' : fileHdr["channels"][channel]['data']}
+      
+      # In rolling mode, not all samples are valid otherwise use all samples
+      if fileHdr["rollStop"] == 0:
+        channelDict["samples"] = {'raw' : fileHdr["channels"][channel]['data']}
+      else:
+        channelDict["samples"] = {'raw' : fileHdr["channels"][channel]['data'][:fileHdr["rollStop"]]}
+        
       channelDict["samples"]["volts"] =  [((125-x)/25.*channelDict["scale"] + channelDict["shift"])*sign for x in channelDict["samples"]["raw"]]
       
       samples = len(channelDict["samples"]["raw"])
