@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 
-from __future__ import print_function
+from __future__ import print_function, with_statement
 import argparse
 import collections
 import sys
@@ -43,7 +43,8 @@ if __name__ == "__main__":
   args = parser.parse_args()
   
   try:
-    scopeData = wfm.parseRigolWFM(args.infile, args.forgiving)
+    with args.infile as f:
+      scopeData = wfm.parseRigolWFM(f, args.forgiving)
   except wfm.FormatError as e:
     print("Format does not follow the known file format. Try the --forgiving option.", file=sys.stderr)
     print("If you'd like to help development, please report this error:\n", file=sys.stderr)
