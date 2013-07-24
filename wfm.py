@@ -74,7 +74,8 @@ def parseRigolWFM(f, strict=True):
   mode (rb).
   
   The parser has been developed based on a RIGOL DS1052E and protocol 
-  information derived from http://meteleskublesku.cz/wfm_view/file_wfm.zip.
+  information derived from http://meteleskublesku.cz/wfm_view/file_wfm.zip
+  and own experimentation.
   
   The result of the parsing is a nested dictionary containing all relevant data.
   
@@ -90,16 +91,17 @@ def parseRigolWFM(f, strict=True):
 
   chan_header  = (
     ("scaleD",     "i", None),
+    
     ("shiftD",     "h", None),
-    ("fooA",       "H", ("expect", "==", 0)),
+    ("padding1",   "2s",  ("require", "==", b'\x00'*2)),
+    
     ("probeAtt",   "f", ("require", ">", 0)),
     ("invertD",    "B", ("require", "in", (0,1))),
     ("written",    "B", ("require", "in", (0,1))),
     ("invertM",    "B", ("require", "in", (0,1))),
-    ("fooB",       "B", ("expect", "==", 0)),
+    ("padding2",   "1s",  ("require", "==", b'\x00'*1)),
     ("scaleM",     "i", None),
-    ("shiftM",     "h", None),
-    ("fooC",       "H", ("expect", "==", 0))
+    ("shiftM",     "h", None)
   )
   
   time_header  = (
@@ -115,16 +117,16 @@ def parseRigolWFM(f, strict=True):
     ("source",     "B", None),
     ("coupling",   "B", None),
     ("sweep",      "B", None),
-    ("fooA",       "B", ("expect", "==", 0)),
+    ("padding1",   "1s",  ("require", "==", b'\x00'*1)),
     ("sens",       "f", None),
     ("holdoff",    "f", None),
     ("level",      "f", None),
     ("direct",     "B", None),
     ("pulseType",  "B", None),
-    ("fooB",       "H", ("expect", "==", 0)),
+    ("padding1",   "2s",  ("require", "==", b'\x00'*2)),
     ("PulseWidth", "f", None),
     ("slopeType",  "B", None),
-    ("fooC",       "3s", ("expect", "==", b'\x00'*3)),
+    ("padding1",   "3s",  ("require", "==", b'\x00'*3)),
     ("lower",      "f", None),
     ("slopeWid",   "f", None),
     ("videoPol",   "B", None),
@@ -132,26 +134,44 @@ def parseRigolWFM(f, strict=True):
     ("videoStd",   "B", None)
   )
   
-  wfm_header = (
-    ("magic",    "H",   ("require", "==", 0xa5a5)),
-    
-    ("fooA1",    "14s", ("expect", "==", b'\x00'*14)),
-    ("fooA2",    "B",   ("expect", "in", (0, 1))),      # Unknown field. 0 in most cases.
-    ("fooA3",    "11s", ("expect", "==", b'\x00'*11)),
-    
-    ("points1",  "I",   None),
-    ("activeCh", "B",   ("require", "in", range(1,5))),
-    ("fooB",     "3s",  ("expect", "==", b'\x00'*3)),
-    
-    ("channel1", "nested", chan_header),
-    ("channel2", "nested", chan_header),
-    
-    ("time1",    "nested", time_header),
-    
+  logic_analizer_channel = (
+    # Todo: Try to add logic analyzer
     ("fooC",     "4s", ("expect", "==", b'\x00'*4)),
     ("fooD",     "8s", ("expect", "==", b'\x00\x01\x02\x03\x04\x05\x06\x07')),
     ("fooE",     "8s", ("expect", "==", b'\x00\x01\x02\x03\x04\x05\x06\x07')),
     ("fooF",     "2s", ("expect", "==", b'\x07'*2)),
+  )
+  
+  wfm_header = (
+    ("magic",    "H",   ("require", "==", 0xa5a5)),
+    ("padding1", "2s",  ("require", "==", b'\x00'*2)),
+    
+    ("unused1",  "4s",   ("expect", "==", b'\x00'*4)),
+    ("unused2",  "4s",   ("expect", "==", b'\x00'*4)),
+    ("unused3",  "4s",   ("expect", "==", b'\x00'*4)),
+    
+    ("adcMode",   "B",   ("expect", "in", (0, 1))),
+    ("padding2",  "3s",  ("require", "==", b'\x00'*3)),
+    
+    ("rollStop",  "4s",  ("expect", "==", b'\x00'*4)),
+    ("unused4",  "4s",   ("expect", "==", b'\x00'*4)),
+    
+    ("points1",  "I",   None),
+    
+    ("activeCh", "B",   ("require", "in", range(1,5))),
+    ("padding3", "3s",  ("require", "==", b'\x00'*3)),
+    
+    ("channel1", "nested", chan_header),
+    ("padding4", "2s",  ("require", "==", b'\x00'*2)),
+    
+    ("channel2", "nested", chan_header),
+    
+    ("timeDelayed", "B",  None),
+    ("padding5",    "1s",  ("require", "==", b'\x00'*1)),
+    
+    ("time1",    "nested", time_header),
+    
+    ("channelLA", "nested", logic_analizer_channel),
     
     ("trigMode", "B",  None),      #FIXME: Add test
     ("trigHdr1", "nested", trigger_header),
@@ -172,8 +192,6 @@ def parseRigolWFM(f, strict=True):
   wfm_header_append_v2 = (
     ("smpRate",  "f",  ("require", ">=", 0)),
   )
-  
-
   
   fileHdr = _parseFile(f, wfm_header, strict=strict)
   
