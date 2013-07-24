@@ -197,9 +197,14 @@ def parseRigolWFM(f, strict=True):
   
   # Add some simple access helpers for the repeating fields
   fileHdr["channels"] = (fileHdr["channel1"], fileHdr["channel2"])
-  fileHdr["points"] = (fileHdr["points1"], fileHdr["points2"])
   fileHdr["triggers"] = (fileHdr["trigHdr1"], fileHdr["trigHdr2"])
   fileHdr["times"] = (fileHdr["time1"], fileHdr["time2"])
+  
+  # Sometimes, the channel length of the second channel is not written
+  # so the first channel has to be used.
+  fileHdr["points"] = [fileHdr["points1"], fileHdr["points2"]]
+  if fileHdr["channels"][1]["written"] and fileHdr["points"][1] == 0:
+    fileHdr["points"][1] = fileHdr["points"][0]
   
   totalPoints = 0
   for channel in range(2):
@@ -236,12 +241,7 @@ def parseRigolWFM(f, strict=True):
     if fileHdr["channels"][channel]['written']:
       #print("Channel %i written, reading it" % channel)
       nBytes = fileHdr["points"][dataIdx] * struct.calcsize("B")
-      
-      if nBytes == 0 and dataIdx==1:
-        nBytes = fileHdr['points1']
-      
-      assert nBytes > 0
-      
+    
       sampleData = array.array('B')
       sampleData.fromfile(f, nBytes)
       fileHdr["channels"][channel]['data'] = sampleData
