@@ -367,7 +367,7 @@ def describeScopeData(scopeData):
   """
   def describeDict(d, description, ljust=0):
     tmp = ""
-    for item, desc in description.items():
+    for item, desc in description:
       if item in d:
         tmp = tmp + "%s: %s\n" % (desc[0].ljust(ljust), desc[1] % d[item])
     return tmp
@@ -375,46 +375,46 @@ def describeScopeData(scopeData):
   def header(header_name, sep = '='):
     return "\n%s\n%s\n" % (header_name, sep*len(header_name))
   
-  headerDsc = {
-    'activeChannel'     : ("Cur. selected channel", "%s"),
-    'alternateTrigger'  : ("Alternate trigger", "%s")
-    }
+  headerDsc = (
+    ('activeChannel'     , ("Cur. selected channel", "%s")),
+    ('alternateTrigger'  , ("Alternate trigger", "%s")),
+    )
   
-  channelDsc = {
-    'enabled'           : ("Enabled", "%s"),
-    'probeAttenuation'  : ("Probe attenuation", "%0.1f"),
-    'scale'             : ("Y grid scale", "%0.3e V/div"),
-    'shift'             : ("Y shift", "%0.3e V"),
-    'inverted'          : ("Y inverted", "%s"),
-    'timeDiv'           : ("Time grid scale", "%0.3e s/div"),
-    'samplerate'        : ("Samplerate", "%0.3e Samples/s"),
-    'timeDelay'         : ("Time delay", "%0.3e s"),
-    'nsamples'          : ("No. of recorded samples", "%i")
-    }
+  channelDsc = (
+    ('enabled'           , ("Enabled", "%s")),
+    ('probeAttenuation'  , ("Probe attenuation", "%0.1f")),
+    ('scale'             , ("Y grid scale", "%0.3e V/div")),
+    ('shift'             , ("Y shift", "%0.3e V")),
+    ('inverted'          , ("Y inverted", "%s")),
+    ('timeDiv'           , ("Time grid scale", "%0.3e s/div")),
+    ('samplerate'        , ("Samplerate", "%0.3e Samples/s")),
+    ('timeDelay'         , ("Time delay", "%0.3e s")),
+    ('nsamples'          , ("No. of recorded samples", "%i")),
+    )
     
-  triggerDsc = {
-    'mode'              : ("Mode", "%s"),
-    'source'            : ("Source", "%s"),
-    'coupling'          : ("Coupling", "%s"),
-    'sweep'             : ("Sweep", "%s"),
-    'holdoff'           : ("Holdoff", "%0.3e s"),
-    'sensitivity'       : ("Sensitivity", "%0.3e div"),
-    'level'             : ("Level", "%0.3e V"),
+  triggerDsc = (
+    ('mode'              , ("Mode", "%s")),
+    ('source'            , ("Source", "%s")),
+    ('coupling'          , ("Coupling", "%s")),
+    ('sweep'             , ("Sweep", "%s")),
+    ('holdoff'           , ("Holdoff", "%0.3e s")),
+    ('sensitivity'       , ("Sensitivity", "%0.3e div")),
+    ('level'             , ("Level", "%0.3e V")),
     
-    'edgeDirection'     : ("Edge direction", "%s"),
+    ('edgeDirection'     , ("Edge direction", "%s")),
     
-    'pulseType'         : ("Pulse type", "%s"),
-    'pulseWidth'        : ("Pulse type","%0.3e s"),
+    ('pulseType'         , ("Pulse type", "%s")),
+    ('pulseWidth'        , ("Pulse type","%0.3e s")),
     
-    'slopeType'         : ("Slope type", "%s"),
-    'slopeLowerLevel'   : ("Slope lower level","%0.3e V"),
-    'slopeWidth'        : ("Slope width","%0.3e s"),
-    'slope'             : ("Slope slope","%0.3e V/s"),
+    ('slopeType'         , ("Slope type", "%s")),
+    ('slopeLowerLevel'   , ("Slope lower level","%0.3e V")),
+    ('slopeWidth'        , ("Slope width","%0.3e s")),
+    ('slope'             , ("Slope slope","%0.3e V/s")),
     
-    'videoPol'          : ("Video polarity", "%s"),
-    'videoSync'         : ("Video sync", "%s"),
-    'videoStd'          : ("Video standard", "%s"),
-    }
+    ('videoPol'          , ("Video polarity", "%s")),
+    ('videoSync'         , ("Video sync", "%s")),
+    ('videoStd'          , ("Video standard", "%s")),
+    )
   
   tmp = ""
   
