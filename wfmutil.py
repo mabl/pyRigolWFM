@@ -35,7 +35,7 @@ if __name__ == "__main__":
   import argparse
   import pprint
   
-  parser = argparse.ArgumentParser(description='Rigol DS1052E WFM file reader')
+  parser = argparse.ArgumentParser(description='Rigol DS1000 series WFM file reader')
   parser.add_argument('action', choices=['info', 'csv', 'plot', 'json'], help="Action")
   parser.add_argument('infile', type=argparse.FileType('rb'))
   parser.add_argument('--forgiving', action='store_false', help="Lazier file parsing")
