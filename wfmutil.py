@@ -36,7 +36,7 @@ if __name__ == "__main__":
   import pprint
   
   parser = argparse.ArgumentParser(description='Rigol DS1052E WFM file reader')
-  parser.add_argument('action', choices=['info', 'csv', 'plot'], help="Action")
+  parser.add_argument('action', choices=['info', 'csv', 'plot', 'json'], help="Action")
   parser.add_argument('infile', type=argparse.FileType('rb'))
   parser.add_argument('--forgiving', action='store_false', help="Lazier file parsing")
   
@@ -128,3 +128,15 @@ if __name__ == "__main__":
     plt.ylabel("Magnitude [dB]")
     plt.xlabel("Frequency [Hz]")
     plt.show()
+    
+  if args.action == "json":
+    import json
+    import array
+    
+    class ArrayEncoder(json.JSONEncoder):
+      def default(self, obj):
+        if isinstance(obj, array.array):
+          return tuple(obj)
+        return json.JSONEncoder.default(self, obj)
+      
+    print(json.dumps(scopeData, cls=ArrayEncoder, indent=4, separators=(',', ': ')))
