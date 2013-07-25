@@ -316,7 +316,6 @@ def parseRigolWFM(f, strict=True):
       channelDict["probeAttenuation"] = fileHdr["channels"][channel]["probeAtt"]
       channelDict["scale"] = fileHdr["channels"][channel]["scaleM"] * 1e-6 * channelDict["probeAttenuation"]
       
-      # FIXME: Check if division by 255 is correct. Some people do multiply by 0.04 (which is 250). 
       channelDict["shift"] = fileHdr["channels"][channel]["shiftM"] / 250. * channelDict["scale"] 
       channelDict["inverted"] = fileHdr["channels"][channel]["invertM"]
       
