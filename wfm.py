@@ -316,7 +316,7 @@ def parseRigolWFM(f, strict=True):
       channelDict["probeAttenuation"] = fileHdr["channels"][channel]["probeAtt"]
       channelDict["scale"] = fileHdr["channels"][channel]["scaleM"] * 1e-6 * channelDict["probeAttenuation"]
       
-      channelDict["shift"] = fileHdr["channels"][channel]["shiftM"] / 250. * channelDict["scale"] 
+      channelDict["shift"] = fileHdr["channels"][channel]["shiftM"] / 25. * channelDict["scale"] 
       channelDict["inverted"] = fileHdr["channels"][channel]["invertM"]
       
       if channelDict["inverted"]:
@@ -332,7 +332,7 @@ def parseRigolWFM(f, strict=True):
       else:
         channelDict["samples"] = {'raw' : fileHdr["channels"][channel]['data'][:fileHdr["rollStop"]]}
         
-      channelDict["samples"]["volts"] =  [((125-x)/25.*channelDict["scale"] + channelDict["shift"])*sign for x in channelDict["samples"]["raw"]]
+      channelDict["samples"]["volts"] =  [((125-x)/25.*channelDict["scale"] - channelDict["shift"])*sign for x in channelDict["samples"]["raw"]]
       
       samples = len(channelDict["samples"]["raw"])
       channelDict["nsamples"] = samples
