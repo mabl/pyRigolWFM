@@ -136,10 +136,12 @@ def parseRigolWFM(f, strict=True):
   
   logic_analizer_channel = (
     # Todo: Try to add logic analyzer
-    ("fooC",     "4s", ("expect", "==", b'\x00'*4)),
-    ("fooD",     "8s", ("expect", "==", b'\x00\x01\x02\x03\x04\x05\x06\x07')),
-    ("fooE",     "8s", ("expect", "==", b'\x00\x01\x02\x03\x04\x05\x06\x07')),
-    ("fooF",     "2s", ("expect", "==", b'\x07'*2)),
+    ("written",  "B", ("require", "in", (0,1))),
+    ("activeCh", "B", ("require", "in", range(16))),
+    ("enabledChannels", "H", None), # Each bit corresponds to one enabled channel
+    ("position", "16s", None),
+    ("group8to15size", "B", ("require", "in", [7,15])),
+    ("group0to7size", "B", ("require", "in", [7,15]))
   )
   
   wfm_header = (
@@ -158,7 +160,7 @@ def parseRigolWFM(f, strict=True):
     
     ("points1",  "I",   None),
     
-    ("activeCh", "B",   ("require", "in", range(1,5))),
+    ("activeCh", "B",   ("require", "in", range(1,6))),
     ("padding3", "3s",  ("require", "==", b'\x00'*3)),
     
     ("channel1", "nested", chan_header),
@@ -184,13 +186,13 @@ def parseRigolWFM(f, strict=True):
   )
   
   # There are two known versions of the WFM file format:
-  # 1. The presumably older version does not include the smpRate 
+  # 1. The presumably older version does not include the laSmpRate 
   #    field.
-  # 2. The smpRate field is added between the time2 header and
+  # 2. The laSmpRate field is added between the time2 header and
   #    the channel data.
   
   wfm_header_append_v2 = (
-    ("smpRate",  "f",  ("require", ">=", 0)),
+    ("laSmpRate",  "f",  ("require", ">=", 0)),
   )
   
   fileHdr = _parseFile(f, wfm_header, strict=strict)
@@ -206,10 +208,14 @@ def parseRigolWFM(f, strict=True):
   if fileHdr["channels"][1]["written"] and fileHdr["points"][1] == 0:
     fileHdr["points"][1] = fileHdr["points"][0]
   
-  totalPoints = 0
+  totalPointBytes = 0
   for channel in range(2):
     if fileHdr["channels"][channel]['written']:
-      totalPoints = totalPoints + fileHdr["points"][channel]
+      totalPointBytes += fileHdr["points"][channel] * struct.calcsize("B")
+  if fileHdr['channelLA']['written']:
+    #NOTE: It is not exactly sure where the LA sample length is stored.
+    #NOTE: we assume it to be the same as points1 for now.
+    totalPointBytes += fileHdr["points"][0] * struct.calcsize("H")
   
   # #
   # Detect file version based on file length
@@ -222,7 +228,7 @@ def parseRigolWFM(f, strict=True):
   
   # Calculate the bytes difference if the data section was to 
   # start here
-  bytesMissing = (fileSize - filePosition) - totalPoints * struct.calcsize("B")
+  bytesMissing = (fileSize - filePosition) - totalPointBytes
   
   if bytesMissing == 0:
     pass
@@ -247,16 +253,22 @@ def parseRigolWFM(f, strict=True):
       fileHdr["channels"][channel]['data'] = sampleData
       dataIdx = dataIdx + 1
   
+  if fileHdr['channelLA']['written']:
+    nBytes = fileHdr["points"][0] * struct.calcsize("B")
+    sampleData = array.array('H')
+    sampleData.fromfile(f, nBytes)
+    if sys.byteorder == 'big':
+      sampleData.byteswap()
+      
+    fileHdr["channelLA"]['data'] = sampleData
+    
   
   # # # # # # # # # # # #
   # Interpreter all the results to mean something useful.
   scopeData = dict()
   
   # Other general information
-  scopeData["activeChannel"] = ("CH1", "CH2", "REF", "MATH")[fileHdr["activeCh"] - 1]
-  
-  if "smpRate" in fileHdr:
-    scopeData["samplerate"] = fileHdr["smpRate"]
+  scopeData["activeChannel"] = ("CH1", "CH2", "REF", "MATH", "LA")[fileHdr["activeCh"] - 1]
   
   # If we are not using alternate trigger, all channels share the same trigger
   # information.
@@ -345,7 +357,6 @@ def parseRigolWFM(f, strict=True):
       channelDict["samplerate"] = timebase["smpRate"]
       channelDict["timeScale"] = 1./timebase["smpRate"]
       channelDict["timeDelay"] = 1e-12 * timebase['delayM']
-      
       channelDict["timeDiv"] = timebase['scaleM'] * 1e-12 
       
       channelDict["samples"]["time"] = [
@@ -355,6 +366,62 @@ def parseRigolWFM(f, strict=True):
     # Save channel data to the overall scope data
     scopeData["channel"][channel+1] = channelDict
   
+  # Add LA channel
+  channelDict = dict()
+  channelDict["enabled"] = fileHdr["channelLA"]['written']
+  channelDict["channelName"] = "CHLA"
+  
+  if channelDict["enabled"]:
+    # NOTE: It is not yet sure what happens if one analog channel and LA is used in alternate trigger
+    # NOTE: mode. I have no scope to test if it is even possible.
+    # NOTE: For now, we assume that LA is always like time scale 1.
+    timebase = fileHdr["time1"]
+    if "laSmpRate" in fileHdr:
+      channelDict["samplerate"] = fileHdr["laSmpRate"]
+    else:
+      channelDict["samplerate"] = timebase["smpRate"]
+    
+    # In rolling mode, not all samples are valid otherwise use all samples
+    if fileHdr["rollStop"] == 0:
+      channelDict["samples"] = {'raw' : fileHdr["channelLA"]['data']}
+    else:
+      channelDict["samples"] = {'raw' : fileHdr["channelLA"]['data'][:fileHdr["rollStop"]]}
+    
+    samples = len(channelDict["samples"]["raw"])
+    channelDict["nsamples"] = samples
+        
+    channelDict["timeScale"] = 1./channelDict["samplerate"]
+    channelDict["timeDelay"] = 1e-12 * timebase['delayM']
+    channelDict["timeDiv"] = timebase['scaleM'] * 1e-12 
+    
+    channelDict["samples"]["time"] = [
+      (t - samples/2) * channelDict["timeScale"] + channelDict["timeDelay"]
+                        for t in range(samples)]
+    
+    channelDict["activeChannel"] = fileHdr["channelLA"]['activeCh']
+    channelDict["enabledChannelsMask"] = [bool(fileHdr["channelLA"]['enabledChannels'] & (1<<p)) for p in range(16)]
+    channelDict["enabledChannelsMaskRaw"] = fileHdr["channelLA"]['enabledChannels']
+    assert channelDict["enabledChannelsMask"][channelDict["activeChannel"]], "Active channel is not enabled!"
+    
+    channelDict["enabledChannels"] = list()
+    for i in range(16):
+      if channelDict["enabledChannelsMask"][i]:
+        channelDict["enabledChannels"].append(i)
+    
+    # Separate data into channels
+    channelDict["samples"]['byChannel'] = {
+      c : [(sample & 1<<c)>0 for sample in channelDict["samples"]['raw']] for c in channelDict["enabledChannels"]
+      }
+    
+    channelDict["waveSizeGroup1"] = {7:'big', 15:'small'}[fileHdr["channelLA"]['group0to7size']]
+    channelDict["waveSizeGroup2"] = {7:'big', 15:'small'}[fileHdr["channelLA"]['group8to15size']]
+    
+    channelDict["position"] = [p for p in fileHdr["channelLA"]['position']]
+    
+  # Save channel data to the overall scope data
+  scopeData["channel"]['LA'] = channelDict
+  
+  #pprint.pprint(scopeData)
   return scopeData
   
   
@@ -389,8 +456,14 @@ def describeScopeData(scopeData):
     ('samplerate'        , ("Samplerate", "%0.3e Samples/s")),
     ('timeDelay'         , ("Time delay", "%0.3e s")),
     ('nsamples'          , ("No. of recorded samples", "%i")),
-    )
     
+    ('activeChannel'     , ("Active channel", "%i")),
+    ('enabledChannels'   , ("Enabled channels", "%s")),
+    
+    ('waveSizeGroup1'    , ("Size group 1 (D0-D7)", "%s")),
+    ('waveSizeGroup1'    , ("Size group 2 (D0-D7)", "%s")),
+    )
+  
   triggerDsc = (
     ('mode'              , ("Mode", "%s")),
     ('source'            , ("Source", "%s")),
@@ -420,17 +493,18 @@ def describeScopeData(scopeData):
   tmp = tmp + header("General")
   tmp = tmp + describeDict(scopeData, headerDsc, ljust=25)
   
-  for i in range(1,3):
+  for i in [1, 2, 'LA']:
     channelDict = scopeData["channel"][i]
     
     tmp = tmp + header("Channel %s" % channelDict["channelName"])
     tmp = tmp + describeDict(channelDict, channelDsc, ljust=25)
     
     if scopeData["alternateTrigger"]:
-      tmp = tmp + header("Channel %s Trigger" % channelDict["channelName"], sep='-')
-      tmp = tmp + describeDict(channelDict["triggers"], triggerDsc, ljust=25)
+      if "triggers" in channelDict:
+        tmp = tmp + header("Channel %s Trigger" % channelDict["channelName"], sep='-')
+        tmp = tmp + describeDict(channelDict["triggers"], triggerDsc, ljust=25)
     else:
       tmp = tmp + header("Trigger")
       tmp = tmp + describeDict(scopeData["triggers"], triggerDsc, ljust=25)
-    
+  
   return tmp

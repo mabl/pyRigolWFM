@@ -36,7 +36,7 @@ if __name__ == "__main__":
   import pprint
   
   parser = argparse.ArgumentParser(description='Rigol DS1000 series WFM file reader')
-  parser.add_argument('action', choices=['info', 'csv', 'plot', 'json'], help="Action")
+  parser.add_argument('action', choices=['info', 'csv', 'plot', 'json', 'vcd', 'ols'], help="Action")
   parser.add_argument('infile', type=argparse.FileType('rb'))
   parser.add_argument('--forgiving', action='store_false', help="Lazier file parsing")
   
@@ -102,31 +102,58 @@ if __name__ == "__main__":
     import scipy
     import scipy.fftpack
     
-    plt.subplot(211)
+    hasAnalog = scopeData["channel"][1]["enabled"] | scopeData["channel"][2]["enabled"]
+    hasDigital = scopeData["channel"]['LA']["enabled"]
     
-    for i in range(2):
-      if scopeData["channel"][i+1]["enabled"]:
-        plt.plot(scopeData["channel"][i+1]["samples"]["time"], scopeData["channel"][i+1]["samples"]["volts"])
-    plt.grid()
+    if hasAnalog:
+      plt.subplot(211)
+    
+    if hasAnalog:
+      for i in range(2):
+        if scopeData["channel"][i+1]["enabled"]:
+          plt.plot(scopeData["channel"][i+1]["samples"]["time"], 
+                    scopeData["channel"][i+1]["samples"]["volts"])
+      plt.grid()
+      plt.ylabel("Voltage [V]")
+    
+    if hasAnalog & hasDigital:
+      plt.twinx()
+    
+    if hasDigital:
+      CHANNEL_SPACING = 1
+      CHANNEL_HIGHT = 0.8
+      
+      for channel in scopeData['channel']['LA']['enabledChannels']:
+        time = scopeData["channel"]['LA']["samples"]["time"]
+        data = scopeData["channel"]['LA']["samples"]["byChannel"][channel]
+        
+        # Shift data to a correct position for display
+        channel_offset = CHANNEL_SPACING * scopeData["channel"]['LA']['position'][channel]
+        data_display = [d*CHANNEL_HIGHT + channel_offset for d in data]
+        
+        plt.plot(time, data_display)
+        plt.ylabel("Digital Channels")
+        plt.grid()
+    
     plt.title("Waveform")
-    plt.ylabel("Voltage [V]")
     plt.xlabel("Time [s]")
     
-    
-    plt.subplot(212)
-    for i in range(2):
-      channelDict = scopeData["channel"][i+1]
-      if channelDict["enabled"]:
-        
-        signal = np.array(channelDict["samples"]["volts"])
-        fft = np.abs(np.fft.fftshift(scipy.fft(signal)))
-        freqs = np.fft.fftshift(scipy.fftpack.fftfreq(signal.size, channelDict["timeScale"]))
-        plt.plot(freqs, 20 * np.log10(fft))
-    
-    plt.grid()
-    plt.title("FFT")
-    plt.ylabel("Magnitude [dB]")
-    plt.xlabel("Frequency [Hz]")
+    if hasAnalog:
+      plt.subplot(212)
+      for i in range(2):
+        channelDict = scopeData["channel"][i+1]
+        if channelDict["enabled"]:
+          
+          signal = np.array(channelDict["samples"]["volts"])
+          fft = np.abs(np.fft.fftshift(scipy.fft(signal)))
+          freqs = np.fft.fftshift(scipy.fftpack.fftfreq(signal.size, channelDict["timeScale"]))
+          plt.plot(freqs, 20 * np.log10(fft))
+      
+      plt.grid()
+      plt.title("FFT")
+      plt.ylabel("Magnitude [dB]")
+      plt.xlabel("Frequency [Hz]")
+      
     plt.show()
     
   if args.action == "json":
@@ -140,3 +167,54 @@ if __name__ == "__main__":
         return json.JSONEncoder.default(self, obj)
       
     print(json.dumps(scopeData, cls=ArrayEncoder, indent=4, separators=(',', ': ')))
+    
+  if args.action == 'vcd':
+    if not scopeData["channel"]['LA']["enabled"]:
+      print("No logic channels enabled in file!", file=sys.stderr)
+      sys.exit(-1)
+      
+    def stringSection(name, value = "", seperator=' '):
+      return '$%(name)s%(seperator)s%(value)s%(seperator)s$end' % {'name':name, 'value':value, 'seperator':seperator}
+    
+    print(stringSection("timescale", "%0.9fs" % scopeData["channel"]['LA']['timeScale']))
+    print(stringSection("scope", "module logic"))
+    
+    def channelToSymbol(c):
+      assert c >= 0 & c<16
+      return chr(ord('a') + c)
+    
+    for c in scopeData['channel']['LA']['enabledChannels']:
+      print(stringSection("var", "wire 1 %s D%02i" % (channelToSymbol(c), c)))
+     
+    print(stringSection("upscope"))
+    print(stringSection("enddefinitions"))
+    
+    lastState = None
+    for pos in range(scopeData['channel']['LA']['nsamples']):
+      currState = scopeData['channel']['LA']['samples']['raw'][pos]
+      if lastState != currState:
+        lastState = currState
+        
+        print('#%i' % pos)
+        
+        for c in scopeData['channel']['LA']['enabledChannels']:
+          print('%i%s' % (scopeData['channel']['LA']['samples']['byChannel'][c][pos], channelToSymbol(c)))
+          
+  if args.action == 'ols':
+    if not scopeData["channel"]['LA']["enabled"]:
+      print("No logic channels enabled in file!", file=sys.stderr)
+      sys.exit(-1)
+      
+    
+    #print(";Size: %i" % scopeData['channel']['LA']['nsamples'])
+    print(";Rate: %i" % scopeData['channel']['LA']['samplerate'])
+    print(";Channels: 16")
+    print(";EnabledChannels: %i" % scopeData['channel']['LA']['enabledChannelsMaskRaw'])
+    #print(";TriggerPosition
+    
+    lastState = None
+    for pos in range(scopeData['channel']['LA']['nsamples']):
+      currState = scopeData['channel']['LA']['samples']['raw'][pos]
+      if lastState != currState:
+        lastState = currState
+        print('%x@%i' % (currState, pos))
