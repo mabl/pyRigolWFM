@@ -297,7 +297,7 @@ def parseRigolWFM(f, strict=True):
       trgDict["slopeType"] = ("RISE >", "RISE <", "RISE =", "FALL >", "FALL <", "FALL =")[trigHdr["slopeType"]]
       trgDict["slopeLowerLevel"] = trigHdr["lower"]  # Volts
       trgDict["slopeWidth"] = trigHdr["slopeWid"]  # Seconds FIXME: What about slopeWid?
-      trgDict["slope"] = (trgDict["level"] -  trgDict["slopeLowerLevel"]) / trgDict["slopeWidth"]       # V/s
+      trgDict["slope"] = (trgDict["level"] -  trgDict["slopeLowerLevel"]) / trgDict["slopeWidth"] if trgDict["slopeWidth"] else float('inf')      # V/s
     
     if trgDict["mode"] in ("Video",):
       trgDict["videoPol"] = ("POS", "NEG")[trigHdr["videoPol"]]
